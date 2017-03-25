@@ -37,6 +37,11 @@ def sent_tokenize(text, category):
 
     text = text.strip()
 
+    phi_tags = re.findall('(\[\*\*.*?\*\*\])', text)
+    for i,tag in enumerate(phi_tags):
+        text = text.replace(tag, '__PHI_%d__' % i)
+        #text = text.replace(tag, '__PHI__')
+
     '''
     Thoughts & Strategies
         - If two newlines separate them, then they aren't in the same sentence
@@ -73,6 +78,12 @@ def sent_tokenize(text, category):
     if category == 'discharge_summary':
         sents = sent_tokenize_discharge_summary(text)
 
+    for i in range(len(sents)):
+        tags = re.findall('(__PHI_(\d+)__)', sents[i])
+        for tag,ind in tags:
+            sents[i] = sents[i].replace(tag, phi_tags[int(ind)])
+
+    return sents
 
 
 def word_tokenize(sent):
@@ -124,12 +135,13 @@ def sent_tokenize_discharge_summary(text):
 
     for segment in segments:
         # find all section headers
-        possible_headers = re.findall('    ([A-Z][^:]+:)', '     '+segment)
-        assert len(possible_headers) < 2
+        #possible_headers   = re.findall('    ([A-Z][^:]+:)', '    '+segment)
+        possible_headers  = re.findall('\n([A-Z][^:]+:)', '\n'+segment)
+        #assert len(possible_headers) < 2, str(possible_headers)
         headers = []
         for h in possible_headers:
-            if is_title(h.strip(':')):
-                headers.append(h)
+            if is_title(h.strip().strip(':')):
+                headers.append(h.strip())
 
         # split text into new segments, delimiting on these headers
         for h in headers:
@@ -155,11 +167,20 @@ def sent_tokenize_discharge_summary(text):
             new_segments.append(segment.strip())
 
     segments = list(new_segments)
+    new_segments = []
 
+    '''
+    for segment in segments:
+        print '------------START------------'
+        print segment
+        print '-------------END-------------'
+        print
+    exit()
+    '''
 
     ### Separate enumerated lists ###
     for segment in segments:
-        if '1.' not in segment: 
+        if not re.search('\n\d+\.', '\n'+segment): 
             new_segments.append(segment)
             continue
 
@@ -172,26 +193,140 @@ def sent_tokenize_discharge_summary(text):
         segment = '\n'+segment
 
         # determine whether this segment contains a bulleted list
-        n = 0
-        while '\n%d.'%(n+1) in segment:
+        start = int(re.search('\n(\d+)\.', '\n'+segment).groups()[0])
+        n = start
+        while '\n%d.'%n in segment:
             n += 1
+        n -= 1
 
         # no bulleted list
         if n < 1:
             new_segments.append(segment)
             continue
 
+        '''
         print '------------START------------'
         print segment
         print '-------------END-------------'
 
-        print n
+        print start,n
         print 
+        '''
 
         # break each list into its own line
-        for i in range(1,n+1):
-            print i
-        print 
+        # challenge: not clear how to tell when the list ends if more text happens next
+        for i in range(start,n+1):
+            prefix  = segment[:segment.index('\n%d.'%i)].strip()
+            segment = segment[ segment.index('\n%d.'%i):].strip()
+
+            if len(prefix)>0:
+                new_segments.append(prefix)
+
+        if len(segment)>0:
+            new_segments.append(segment)
+
+    segments = list(new_segments)
+    new_segments = []
+
+    '''
+        TODO: Big Challenge
+
+        There is so much variation in what makes a list. Intuitively, I can tell it's a
+        list because it shows repeated structure (often following a header)
+
+        Examples of some lists (with numbers & symptoms changed around to noise)
+
+            Past Medical History:
+            -- Hyperlipidemia
+            -- lactose intolerance
+            -- Hypertension
+
+
+            Physical Exam:
+            Vitals - T 82.2 BP 123/23 HR 73 R 21 75% on 2L NC
+            General - well appearing male, sitting up in chair in NAD
+            Neck - supple, JVP elevated to angle of jaw 
+            CV - distant heart sounds, RRR, faint __PHI_43__ murmur at
+
+
+            Labs:
+            __PHI_10__ 12:00PM BLOOD WBC-8.8 RBC-8.88* Hgb-88.8* Hct-88.8*
+            MCV-88 MCH-88.8 MCHC-88.8 RDW-88.8* Plt Ct-888
+            __PHI_14__ 04:54AM BLOOD WBC-8.8 RBC-8.88* Hgb-88.8* Hct-88.8*
+            MCV-88 MCH-88.8 MCHC-88.8 RDW-88.8* Plt Ct-888
+            __PHI_23__ 03:33AM BLOOD WBC-8.8 RBC-8.88* Hgb-88.8* Hct-88.8*
+            MCV-88 MCH-88.8 MCHC-88.8 RDW-88.8* Plt Ct-888
+            __PHI_109__ 03:06AM BLOOD WBC-8.8 RBC-8.88* Hgb-88.8* Hct-88.8*
+            MCV-88 MCH-88.8 MCHC-88.8 RDW-88.8* Plt Ct-888
+            __PHI_1__ 05:09AM BLOOD WBC-8.8 RBC-8.88* Hgb-88.8* Hct-88.8*
+            MCV-88 MCH-88.8 MCHC-88.8 RDW-88.8* Plt Ct-888
+            __PHI_26__ 04:53AM BLOOD WBC-8.8 RBC-8.88* Hgb-88.8* Hct-88.8*
+            MCV-88 MCH-88.8 MCHC-88.8 RDW-88.8* Plt Ct-888
+            __PHI_301__ 05:30AM BLOOD WBC-8.8 RBC-8.88* Hgb-88.8* Hct-88.8*
+            MCV-88 MCH-88.8 MCHC-88.8 RDW-88.8* Plt Ct-888
+
+
+            Medications on Admission:
+            Allopurinol 100 mg DAILY
+            Aspirin 250 mg DAILY
+            Atorvastatin 10 mg DAILY
+            Glimepiride 1 mg once a week.
+            Hexavitamin DAILY
+            Lasix 50mg M-W-F; 60mg T-Th-Sat-Sun
+            Metoprolol 12.5mg TID
+            Prilosec OTC 20 mg once a day
+            Verapamil 120 mg SR DAILY
+    '''
+
+    ### Remove lines with inline titles from larger segments (clearly nonprose)
+    for segment in segments:
+        '''
+        With: __PHI_6__, MD __PHI_5__
+        Building: De __PHI_45__ Building (__PHI_32__ Complex) __PHI_87__
+        Campus: WEST
+        '''
+
+        lines = segment.split('\n')
+
+        buf = []
+        for i in range(len(lines)):
+            if is_inline_title(lines[i]):
+                if len(buf) > 0:
+                    new_segments.append('\n'.join(buf))
+                buf = []
+            buf.append(lines[i])
+        if len(buf) > 0:
+            new_segments.append('\n'.join(buf))
+
+    segments = list(new_segments)
+    new_segments = []
+
+
+    # Going to put one-liner answers with their sections 
+    # (aka A A' B B' C D D' -->  AA' BB' C DD' )
+    N = len(segments)
+    for i in range(len(segments)):
+        # avoid segfaults
+        if i==0: continue
+
+        if     segments[i].count('\n') == 0       and \
+               is_title(segments[i-1].strip(':')) and \
+           not is_title(segments[i  ].strip(':')):
+            if (i == N-1) or is_title(segments[i+1].strip(':')):
+                new_segments = new_segments[:-1]
+                new_segments.append(segments[i-1] + ' ' + segments[i])
+        else:
+            new_segments.append(segments[i])
+
+    segments = list(new_segments)
+    new_segments = []
+
+
+    for segment in segments:
+        print '------------START------------'
+        print segment
+        print '-------------END-------------'
+        print
 
     exit()
 
@@ -204,6 +339,15 @@ def strip(s):
 
 
 
+def is_inline_title(text):
+    m = re.search('^([a-zA-Z ]+): ', text)
+    if not m:
+        return False
+
+    return is_title(m.groups()[0])
+
+
+
 stopwords = set(['of', 'on', 'or'])
 def is_title(text):
     # Are all non-stopwords capitalized?
@@ -211,6 +355,10 @@ def is_title(text):
         if word in stopwords: continue
         if not word[0].isupper():
             return False
+
+    # I noticed this is a common issue (non-title aapears at beginning of line)
+    if text == 'Disp':
+        return False
 
     # optionally: could assert that it is less than 6 tokens
 
