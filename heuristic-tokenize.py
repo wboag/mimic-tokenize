@@ -39,31 +39,20 @@ def sent_tokenize(text, category):
 
     phi_tags = re.findall('(\[\*\*.*?\*\*\])', text)
     for i,tag in enumerate(phi_tags):
-        text = text.replace(tag, '__PHI_%d__' % i)
+        text = text.replace(tag, ' __PHI_%d__ ' % i)
         #text = text.replace(tag, '__PHI__')
 
     '''
     Thoughts & Strategies
-        - If two newlines separate them, then they aren't in the same sentence
-        - If you reach a segment that has one token per line, then they are each a sent
-        - If something begins with Capitalized Words and a colon, then section header
-            - If a line begins with Capitalized word, then probably new sentence
-            - If a short line ends with a colon, then it is probably a section header
         - If a newline happens in between matching parens, then ignore newline
         - Identify prose v nonprose. Use nltk.sent_tokenize on prose
-            - It's not perfect, but it is pretty good with ignoring mid-sentence newlines
+            - not perfect, but it is pretty good with ignoring mid-sentence newlines
+
         - section header: "\n------ Protected Section ------\n"
-        - how do I get something like: 
-            - "Admission Date:    2123-12-25       Discharge Date:    2124-1-14"
-            - requires mapping the label & answer
-                - could look for any time it is "Noun-Phrase : thing" 
-        - Should really try to characterize the KIND of report
-            - hopefully report is labeled (e.g. discharge, nursing, radiology)
-            - if not, maybe I could train a classifier to predict that category
-            - I think that could really help for specialized heuristics
+
         - If you can detect a bulleted list, then those are sentences
             - sometimes the bullets are hyphens "-", sometimes numbers "1."
-        - discharge summaries very much have their own neat format
+
         - ecg reports are very short & seem to be exclusively prose
         - echo reports are VERY structured. definitely useful to do a echo-specific one
         - nursing notes have a linear structure. sections are easily identifiable
@@ -75,8 +64,8 @@ def sent_tokenize(text, category):
         - strong consistency format in social_work
     '''
 
-    if category == 'discharge_summary':
-        sents = sent_tokenize_discharge_summary(text)
+    #if category == 'discharge_summary':
+    sents = sent_tokenize_rules(text)
 
     for i in range(len(sents)):
         tags = re.findall('(__PHI_(\d+)__)', sents[i])
@@ -108,11 +97,12 @@ def word_tokenize(sent):
 
 
 
-def sent_tokenize_discharge_summary(text):
+def sent_tokenize_rules(text):
 
     # long sections are OBVIOUSLY different sentences
-    text = re.sub('---+', '\n\n---\n\n', text)
-    text = re.sub('___+', '\n\n___\n\n', text)
+    text = re.sub('---+', '\n\n-----\n\n', text)
+    text = re.sub('___+', '\n\n_____\n\n', text)
+    text = re.sub('\n\s+', '\n', text)
     text = re.sub('\n\n+', '\n\n', text)
 
     segments = text.split('\n\n')
@@ -125,10 +115,10 @@ def sent_tokenize_discharge_summary(text):
 
     # deal with this one edge case (multiple headers per line) up front
     m1 = re.match('(Admission Date:) (.*) (Discharge Date:) (.*)', segments[0])
-    m2 = re.match('(Date of Birth:) (.*) (Sex:) (.*)'            , segments[1])
     if m1:
         new_segments += list(map(strip,m1.groups()))
         segments = segments[1:]
+    m2 = re.match('(Date of Birth:) (.*) (Sex:) (.*)'            , segments[0])
     if m2:
         new_segments += list(map(strip,m2.groups()))
         segments = segments[1:]
@@ -136,28 +126,37 @@ def sent_tokenize_discharge_summary(text):
     for segment in segments:
         # find all section headers
         #possible_headers   = re.findall('    ([A-Z][^:]+:)', '    '+segment)
-        possible_headers  = re.findall('\n([A-Z][^:]+:)', '\n'+segment)
+        possible_headers  = re.findall('\n([A-Z][^\n:]+:)', '\n'+segment)
         #assert len(possible_headers) < 2, str(possible_headers)
         headers = []
         for h in possible_headers:
-            if is_title(h.strip().strip(':')):
+            #print 'cand=[%s]' % h
+            if is_title(h.strip()):
+                #print '\tYES=[%s]' % h
                 headers.append(h.strip())
 
         # split text into new segments, delimiting on these headers
         for h in headers:
-            segment = segment.replace(h, '\n\n'+h+'\n\n')
-            segment = re.sub('\n\n+', '\n\n', segment)
-            segs = segment.split('\n\n')
-            assert len(segs) == 3
-            prefix = segs[0]
-            rest = segs[2]
+            h = h.strip()
+            '''
+            print 
+            print '='*50
+            print segment
+            print '='*50
+            print 
+            print 'h:', h
+            print
+            '''
+            ind = segment.index(h)
+            prefix = segment[:ind].strip()
+            rest   = segment[ ind+len(h):].strip()
 
             # add the prefix
             if len(prefix) > 0:
                 new_segments.append(prefix.strip())
 
             # add the header
-            new_segments.append(h.strip())
+            new_segments.append(h)
 
             # remove the prefix from processing
             segment = rest.strip()
@@ -165,6 +164,31 @@ def sent_tokenize_discharge_summary(text):
         # add the final piece (aka what comes after all headers are processed)
         if len(segment) > 0:
             new_segments.append(segment.strip())
+
+    #exit()
+
+    segments = list(new_segments)
+    new_segments = []
+
+    ### Low-hanging fruit: "_____" is a delimiter
+    for segment in segments:
+        subsections = segment.split('\n_____\n')
+        new_segments.append(subsections[0])
+        for ss in subsections[1:]:
+            new_segments.append('_____')
+            new_segments.append(ss)
+
+    segments = list(new_segments)
+    new_segments = []
+
+
+    ### Low-hanging fruit: "-----" is a delimiter
+    for segment in segments:
+        subsections = segment.split('\n-----\n')
+        new_segments.append(subsections[0])
+        for ss in subsections[1:]:
+            new_segments.append('-----')
+            new_segments.append(ss)
 
     segments = list(new_segments)
     new_segments = []
@@ -302,17 +326,20 @@ def sent_tokenize_discharge_summary(text):
     new_segments = []
 
 
+
     # Going to put one-liner answers with their sections 
     # (aka A A' B B' C D D' -->  AA' BB' C DD' )
     N = len(segments)
     for i in range(len(segments)):
         # avoid segfaults
-        if i==0: continue
+        if i==0: 
+            new_segments.append(segments[i])
+            continue
 
         if     segments[i].count('\n') == 0       and \
-               is_title(segments[i-1].strip(':')) and \
-           not is_title(segments[i  ].strip(':')):
-            if (i == N-1) or is_title(segments[i+1].strip(':')):
+               is_title(segments[i-1]) and \
+           not is_title(segments[i  ]):
+            if (i == N-1) or is_title(segments[i+1]):
                 new_segments = new_segments[:-1]
                 new_segments.append(segments[i-1] + ' ' + segments[i])
         else:
@@ -320,6 +347,23 @@ def sent_tokenize_discharge_summary(text):
 
     segments = list(new_segments)
     new_segments = []
+
+    '''
+        Should do some kind of regex to find "TEST: value" in segments
+
+            Indication: Source of embolism.
+            BP (mm Hg): 145/89
+            HR (bpm): 80
+
+        Note: I made a temporary hack that fixes this particular problem. 
+              We'll see how it shakes out
+    '''
+
+
+    '''
+        Separate ALL CAPS lines (Warning... is there ever prose that can be all caps?)
+    '''
+
 
 
     for segment in segments:
@@ -340,7 +384,7 @@ def strip(s):
 
 
 def is_inline_title(text):
-    m = re.search('^([a-zA-Z ]+): ', text)
+    m = re.search('^([a-zA-Z ]+:) ', text)
     if not m:
         return False
 
@@ -350,6 +394,13 @@ def is_inline_title(text):
 
 stopwords = set(['of', 'on', 'or'])
 def is_title(text):
+    if not text.endswith(':'):
+        return False
+    text = text[:-1]
+
+    # be a little loose here... can tighten if it causes errors
+    text = re.sub('(\([^\)]*?\))', '', text)
+
     # Are all non-stopwords capitalized?
     for word in text.split():
         if word in stopwords: continue
