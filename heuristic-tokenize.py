@@ -8,32 +8,32 @@ import os
 
 def main():
 
+    '''
     # read text file from command line
     if len(sys.argv) != 2:
         print >>sys.stderr, '\n\tusage: python %s <txt-file>\n' % sys.argv[0]
         exit(1)
     mimic_note_file = sys.argv[1]
 
-    category = os.path.abspath(mimic_note_file).split('/')[-2]
-
-    print
-    print mimic_note_file
-    print category
-    print
-
     with open(mimic_note_file, 'r') as f:
         text = f.read()
 
     # tokenize
-    sents = sent_tokenize(text, category)
+    sents = discharge_tokenize(text)
+    '''
+
+    for mimic_note_file in sys.argv[1:]:
+        print mimic_note_file
+
+        with open(mimic_note_file, 'r') as f:
+            text = f.read()
+
+        # tokenize
+        sents = discharge_tokenize(text)
 
 
 
-
-def sent_tokenize(text, category):
-
-    #print nltk.sent_tokenize('number one! the challenge, demand satisfaction. if they apologize no need for further action')
-    #print text
+def discharge_tokenize(text):
 
     text = text.strip()
 
@@ -64,7 +64,6 @@ def sent_tokenize(text, category):
         - strong consistency format in social_work
     '''
 
-    #if category == 'discharge_summary':
     sents = sent_tokenize_rules(text)
 
     for i in range(len(sents)):
@@ -75,34 +74,12 @@ def sent_tokenize(text, category):
     return sents
 
 
-def word_tokenize(sent):
-
-    '''
-    We can't assume the notes are synth-id'd, and we dont want our tokenizer breaking
-      [**Doctor First Name**] into a string of tokens, so we should:
-        1. at the beginning, findall() all PHI are save their content
-        2. replace them with placeholder unqiue single-token __PHI1__ tokens
-        3. at the end of the function, replace all of the placeholders with orig values
-    '''
-    phi_tags = re.findall('(\[\*\*.*?\*\*\])', sent)
-    for i,tag in enumerate(phi_tags):
-        sent = sent.replace(tag, '__PHI_%d__' % i)
-        #text = text.replace(tag, '__PHI__')
-
-    '''
-    tags = re.findall('(__PHI_(\d+)__)', sents[i])
-    for tag,ind in tags:
-        sents[i] = sents[i].replace(tag, phi_tags[int(ind)])
-    '''
-
-
 
 def sent_tokenize_rules(text):
 
     # long sections are OBVIOUSLY different sentences
     text = re.sub('---+', '\n\n-----\n\n', text)
     text = re.sub('___+', '\n\n_____\n\n', text)
-    text = re.sub('\n\s+', '\n', text)
     text = re.sub('\n\n+', '\n\n', text)
 
     segments = text.split('\n\n')
@@ -118,6 +95,7 @@ def sent_tokenize_rules(text):
     if m1:
         new_segments += list(map(strip,m1.groups()))
         segments = segments[1:]
+
     m2 = re.match('(Date of Birth:) (.*) (Sex:) (.*)'            , segments[0])
     if m2:
         new_segments += list(map(strip,m2.groups()))
@@ -125,7 +103,6 @@ def sent_tokenize_rules(text):
 
     for segment in segments:
         # find all section headers
-        #possible_headers   = re.findall('    ([A-Z][^:]+:)', '    '+segment)
         possible_headers  = re.findall('\n([A-Z][^\n:]+:)', '\n'+segment)
         #assert len(possible_headers) < 2, str(possible_headers)
         headers = []
@@ -138,37 +115,30 @@ def sent_tokenize_rules(text):
         # split text into new segments, delimiting on these headers
         for h in headers:
             h = h.strip()
-            '''
-            print 
-            print '='*50
-            print segment
-            print '='*50
-            print 
-            print 'h:', h
-            print
-            '''
+
+            # split this segment into 3 smaller segments
             ind = segment.index(h)
             prefix = segment[:ind].strip()
             rest   = segment[ ind+len(h):].strip()
 
-            # add the prefix
+            # add the prefix (potentially empty)
             if len(prefix) > 0:
                 new_segments.append(prefix.strip())
 
             # add the header
             new_segments.append(h)
 
-            # remove the prefix from processing
+            # remove the prefix from processing (very unlikely to be empty)
             segment = rest.strip()
 
         # add the final piece (aka what comes after all headers are processed)
         if len(segment) > 0:
             new_segments.append(segment.strip())
 
-    #exit()
-
+    # copy over the new list of segments (further segmented than original segments)
     segments = list(new_segments)
     new_segments = []
+
 
     ### Low-hanging fruit: "_____" is a delimiter
     for segment in segments:
@@ -208,15 +178,17 @@ def sent_tokenize_rules(text):
             new_segments.append(segment)
             continue
 
-        #print '------------START------------'
-        #print segment
-        #print '-------------END-------------'
-        #print
+        '''
+        print '------------START------------'
+        print segment
+        print '-------------END-------------'
+        print
+        '''
 
         # generalizes in case the list STARTS this section
         segment = '\n'+segment
 
-        # determine whether this segment contains a bulleted list
+        # determine whether this segment contains a bulleted list (assumes i,i+1,...,n)
         start = int(re.search('\n(\d+)\.', '\n'+segment).groups()[0])
         n = start
         while '\n%d.'%n in segment:
@@ -326,7 +298,6 @@ def sent_tokenize_rules(text):
     new_segments = []
 
 
-
     # Going to put one-liner answers with their sections 
     # (aka A A' B B' C D D' -->  AA' BB' C DD' )
     N = len(segments)
@@ -349,7 +320,7 @@ def sent_tokenize_rules(text):
     new_segments = []
 
     '''
-        Should do some kind of regex to find "TEST: value" in segments
+        Should do some kind of regex to find "TEST: value" in segments?
 
             Indication: Source of embolism.
             BP (mm Hg): 145/89
@@ -366,13 +337,14 @@ def sent_tokenize_rules(text):
 
 
 
+    '''
     for segment in segments:
         print '------------START------------'
         print segment
         print '-------------END-------------'
         print
-
     exit()
+    '''
 
     return text.split('\n')
 
