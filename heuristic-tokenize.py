@@ -31,6 +31,12 @@ def main():
         # tokenize
         sents = discharge_tokenize(text)
 
+        for sent in sents:
+            print '-'*40
+            print sent
+            print '='*40
+            print '\n\n'
+
 
 
 def discharge_tokenize(text):
@@ -64,8 +70,18 @@ def discharge_tokenize(text):
         - strong consistency format in social_work
     '''
 
-    sents = sent_tokenize_rules(text)
+    # break into many segments
+    segments = sent_tokenize_rules(text)
 
+    '''
+    # run nltk tokenizer on these segments to split prose
+    sents = []
+    for segment in segments:
+        s = nltk.sent_tokenize(segment)
+        sents += s
+    '''
+
+    # put the PHI back
     for i in range(len(sents)):
         tags = re.findall('(__PHI_(\d+)__)', sents[i])
         for tag,ind in tags:
@@ -174,7 +190,7 @@ def sent_tokenize_rules(text):
 
     ### Separate enumerated lists ###
     for segment in segments:
-        if not re.search('\n\d+\.', '\n'+segment): 
+        if not re.search('\n\s*\d+\.', '\n'+segment): 
             new_segments.append(segment)
             continue
 
@@ -189,9 +205,9 @@ def sent_tokenize_rules(text):
         segment = '\n'+segment
 
         # determine whether this segment contains a bulleted list (assumes i,i+1,...,n)
-        start = int(re.search('\n(\d+)\.', '\n'+segment).groups()[0])
+        start = int(re.search('\n\s*(\d+)\.', '\n'+segment).groups()[0])
         n = start
-        while '\n%d.'%n in segment:
+        while re.search('\n\s*%d.'%n,segment):
             n += 1
         n -= 1
 
@@ -212,8 +228,9 @@ def sent_tokenize_rules(text):
         # break each list into its own line
         # challenge: not clear how to tell when the list ends if more text happens next
         for i in range(start,n+1):
-            prefix  = segment[:segment.index('\n%d.'%i)].strip()
-            segment = segment[ segment.index('\n%d.'%i):].strip()
+            matching_text = re.search('(\n\s*\d+\.)',segment).groups()[0]
+            prefix  = segment[:segment.index(matching_text) ].strip()
+            segment = segment[ segment.index(matching_text):].strip()
 
             if len(prefix)>0:
                 new_segments.append(prefix)
@@ -346,7 +363,7 @@ def sent_tokenize_rules(text):
     exit()
     '''
 
-    return text.split('\n')
+    return segments
 
 
 
